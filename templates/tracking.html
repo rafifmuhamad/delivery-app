@@ -1,0 +1,112 @@
+<!-- Nama File: tracking.html -->
+<!-- Lokasi: templates/tracking.html -->
+
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lacak Pesanan - Private Delivery</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', sans-serif; }
+        body { background-color: #f3f4f6; color: #111827; }
+        
+        .header { background: #111827; color: white; padding: 1rem; text-align: center; }
+        
+        .container { max-width: 600px; margin: 0 auto; padding: 1rem; }
+        .status-card { background: white; padding: 1.5rem; border-radius: 12px; margin-bottom: 1rem; box-shadow: 0 4px 6px rgba(0,0,0,0.05); text-align: center; }
+        
+        .status-badge { display: inline-block; padding: 0.5rem 1rem; background: #8b5cf6; color: white; border-radius: 30px; font-weight: bold; margin-bottom: 1rem; font-size: 1.1rem; }
+        .status-selesai { background: #10b981 !important; }
+        
+        #map { height: 400px; width: 100%; border-radius: 12px; z-index: 1; border: 2px solid #d1d5db; }
+        
+        .driver-info { margin-top: 1rem; background: white; padding: 1rem; border-radius: 12px; text-align: left; }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <h2>Lacak Pesanan Anda</h2>
+    </div>
+
+    <div class="container">
+        <div class="status-card">
+            <h3 style="margin-bottom: 0.5rem;">Hai, {{ order.customer_name }}</h3>
+            <p style="margin-bottom: 1rem; color: #6b7280;">Pesanan Anda: <strong>{{ order.food_items }}</strong></p>
+            
+            {% if order.status == 'Selesai' %}
+                <div class="status-badge status-selesai">✅ Pesanan Selesai Diantar</div>
+                <p>Terima kasih sudah memesan!</p>
+            {% else %}
+                <div class="status-badge" id="status-teks">🛵 Kurir Sedang Dalam Perjalanan</div>
+                <div id="map"></div>
+                
+                <div class="driver-info">
+                    <p style="font-size: 0.9rem; color: #6b7280;">Status GPS Tracker:</p>
+                    <p id="gps-info" style="color: #f59e0b; font-weight: bold;">Menunggu pembaruan lokasi dari kurir...</p>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+
+    {% if order.status != 'Selesai' %}
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        var trackingId = "{{ order.tracking_id }}";
+        
+        // 1. Setup Peta
+        var map = L.map('map').setView([{{ order.lat }}, {{ order.lng }}], 15);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+        // 2. Marker Lokasi Rumah Pembeli (Merah)
+        var customerIcon = L.icon({
+            iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png',
+            iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34]
+        });
+        L.marker([{{ order.lat }}, {{ order.lng }}], {icon: customerIcon}).addTo(map).bindPopup("<b>Lokasi Anda</b>").openPopup();
+
+        // 3. Setup Marker Driver (Hijau/Motor) tapi jangan ditampilkan dulu
+        var driverIcon = L.icon({
+            iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-green.png',
+            iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34]
+        });
+        var driverMarker = null;
+
+        // 4. Menerima data GPS dari Server
+        var socket = io();
+        
+        socket.on('location_broadcast', function(data) {
+            // Pastikan data yang masuk adalah untuk pesanan ini
+            if(data.tracking_id === trackingId) {
+                document.getElementById('gps-info').innerHTML = "🟢 Terhubung! Lokasi kurir sedang dilacak secara live.";
+                document.getElementById('gps-info').style.color = "#10b981";
+
+                var newLatLng = new L.LatLng(data.lat, data.lng);
+                
+                if(!driverMarker) {
+                    // Buat marker driver pertama kali
+                    driverMarker = L.marker(newLatLng, {icon: driverIcon}).addTo(map).bindPopup("<b>Kurir Anda</b>");
+                    
+                    // Sesuaikan zoom agar pembeli dan driver terlihat di satu layar
+                    var group = new L.featureGroup([driverMarker, L.marker([{{ order.lat }}, {{ order.lng }}])]);
+                    map.fitBounds(group.getBounds(), {padding: [50, 50]});
+                } else {
+                    // Cukup geser posisi markernya
+                    driverMarker.setLatLng(newLatLng);
+                }
+            }
+        });
+        
+        // Reload jika status pesanan diubah oleh driver (misal: Selesai)
+        socket.on('status_update', function(data) {
+            if(data.order_id === {{ order.id }}) {
+                location.reload();
+            }
+        });
+    </script>
+    {% endif %}
+</body>
+</html>

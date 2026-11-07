@@ -1,0 +1,144 @@
+<!-- Nama File: driver.html -->
+<!-- Lokasi: templates/driver.html -->
+
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Driver Dashboard - Private Delivery</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', sans-serif; }
+        body { background-color: #f3f4f6; padding-bottom: 2rem; }
+        .header { background: #111827; color: white; padding: 1rem; text-align: center; display: flex; justify-content: space-between; align-items: center;}
+        .header a { color: white; text-decoration: none; font-size: 0.9rem; background: #ef4444; padding: 0.3rem 0.7rem; border-radius: 4px; }
+        .container { padding: 1rem; max-width: 600px; margin: 0 auto; }
+        .order-card { background: white; border-radius: 12px; padding: 1rem; margin-bottom: 1rem; box-shadow: 0 2px 10px rgba(0,0,0,0.05); }
+        .order-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #f3f4f6; padding-bottom: 0.5rem; margin-bottom: 0.5rem; }
+        .badge { padding: 0.3rem 0.6rem; border-radius: 20px; font-size: 0.8rem; font-weight: bold; color: white; }
+        .badge.menunggu { background-color: #f59e0b; }
+        .badge.diterima { background-color: #3b82f6; }
+        .badge.diantar { background-color: #8b5cf6; }
+        .details { font-size: 0.95rem; color: #374151; margin-bottom: 1rem; line-height: 1.5; }
+        .ongkir { font-size: 1.2rem; font-weight: bold; color: #10b981; margin: 0.5rem 0; }
+        .action-buttons { display: flex; flex-direction: column; gap: 0.5rem; }
+        .btn { padding: 0.8rem; border: none; border-radius: 8px; font-weight: bold; font-size: 1rem; cursor: pointer; text-align: center; text-decoration: none; color: white; }
+        .btn-terima { background: #3b82f6; }
+        .btn-antar { background: #8b5cf6; }
+        .btn-selesai { background: #10b981; }
+        .btn-navigasi { background: #111827; }
+        .btn-wa { background: #25D366; } /* Warna Hijau WhatsApp */
+    </style>
+</head>
+<body>
+    <audio id="notifSound" src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg" preload="auto" style="display:none;"></audio>
+    <div class="header"><h4>Panel Driver</h4><a href="/logout">Logout</a></div>
+    
+    <!-- Indikator GPS -->
+    <div id="gps-status" style="display:none; background:#10b981; color:white; text-align:center; padding:0.5rem; font-size:0.9rem;">
+        📡 GPS Aktif: Membagikan lokasi ke pembeli...
+    </div>
+
+    <div class="container" id="orders-container">
+        {% if orders %}
+            {% for order in orders %}
+            <div class="order-card">
+                <div class="order-header">
+                    <h3>{{ order.customer_name }}</h3>
+                    <span class="badge {% if order.status == 'Menunggu Driver' %} menunggu {% elif order.status == 'Diterima' %} diterima {% else %} diantar {% endif %}">
+                        {{ order.status }}
+                    </span>
+                </div>
+                
+                <div class="details">
+                    <p><strong>Pesanan:</strong> {{ order.food_items }}</p>
+                    <p><strong>Alamat:</strong> {{ order.address }}</p>
+                    <p class="ongkir">Ongkir: Rp {{ order.delivery_fee }}</p>
+                </div>
+
+                <div class="action-buttons">
+                    <!-- Tombol berubah berdasarkan status -->
+                    {% if order.status == 'Menunggu Driver' %}
+                        <button class="btn btn-terima" onclick="updateStatus({{ order.id }}, 'Diterima')">Terima Pesanan</button>
+                    {% elif order.status == 'Diterima' %}
+                        <button class="btn btn-antar" onclick="updateStatus({{ order.id }}, 'Sedang Diantar')">Mulai Antar</button>
+                    {% elif order.status == 'Sedang Diantar' %}
+                        
+                        <!-- JIKA STATUS SEDANG DIANTAR: Muncul tombol WA, Navigasi, dan Selesai -->
+                        <a href="https://wa.me/{{ order.customer_phone }}?text=Halo! Pesanan Anda sedang kami antar. Cek pergerakan kurir secara live di sini: {{ request.host_url }}track/{{ order.tracking_id }}" target="_blank" class="btn btn-wa">Bagikan Link Lacak ke WA 💬</a>
+                        <a href="https://www.google.com/maps/dir/?api=1&destination={{ order.lat }},{{ order.lng }}" target="_blank" class="btn btn-navigasi">🗺️ Buka Navigasi Maps</a>
+                        <button class="btn btn-selesai" onclick="updateStatus({{ order.id }}, 'Selesai')">Selesaikan Pesanan</button>
+                        
+                    {% endif %}
+                </div>
+            </div>
+            {% endfor %}
+        {% else %}
+            <p style="text-align: center; color: #6b7280; margin-top: 2rem;">Belum ada pesanan aktif.</p>
+        {% endif %}
+    </div>
+
+    <script>
+        var socket = io();
+        var notifSound = document.getElementById('notifSound');
+
+        socket.on('new_order_event', function(data) {
+            notifSound.play().catch(e => {});
+            Swal.fire({ title: 'Pesanan Baru!', icon: 'info', confirmButtonText: 'Refresh' }).then(() => location.reload());
+        });
+
+        function updateStatus(orderId, newStatus) {
+            Swal.fire({
+                title: 'Konfirmasi', text: 'Ubah ke ' + newStatus + '?', icon: 'question', showCancelButton: true
+            }).then((result) => {
+                if (result.isConfirmed) {
+                    fetch('/update_order_status/' + orderId, {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ status: newStatus })
+                    }).then(res => res.json()).then(data => {
+                        if(data.success) location.reload();
+                    });
+                }
+            });
+        }
+
+        // --- SISTEM PELACAKAN GPS DRIVER ---
+        // Cek apakah ada pesanan yang statusnya "Sedang Diantar"
+        const activeTrackings = [];
+        {% for order in orders %}
+            {% if order.status == 'Sedang Diantar' %}
+                activeTrackings.push("{{ order.tracking_id }}");
+            {% endif %}
+        {% endfor %}
+
+        // Jika ada pesanan yang sedang diantar, aktifkan GPS!
+        if (activeTrackings.length > 0) {
+            document.getElementById('gps-status').style.display = 'block';
+            
+            if (navigator.geolocation) {
+                // watchPosition akan terus mengambil koordinat GPS selama driver bergerak
+                navigator.geolocation.watchPosition(function(position) {
+                    // Kirim ke server
+                    activeTrackings.forEach(id => {
+                        socket.emit('driver_update_location', {
+                            tracking_id: id,
+                            lat: position.coords.latitude,
+                            lng: position.coords.longitude
+                        });
+                    });
+                }, function(error) {
+                    console.error("GPS Error: ", error);
+                    if(error.code == 1) alert("Tolong izinkan akses lokasi pada browser untuk fitur Live Tracking!");
+                }, {
+                    enableHighAccuracy: true, // Akurasi tinggi
+                    maximumAge: 0 // Jangan gunakan cache lokasi lama
+                });
+            } else {
+                alert("Browser HP Anda tidak mendukung GPS.");
+            }
+        }
+    </script>
+</body>
+</html>
