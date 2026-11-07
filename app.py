@@ -7,6 +7,7 @@ from flask_socketio import SocketIO, emit
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime
 import secrets
+import os # Wajib ditambahkan untuk hosting Glitch
 
 # 1. SETUP APLIKASI
 app = Flask(__name__)
@@ -107,20 +108,14 @@ def update_order_status(order_id):
     socketio.emit('status_update', {'order_id': order.id, 'status': new_status})
     return jsonify({'success': True, 'message': 'Status diperbarui!'})
 
-# --- FITUR LIVE TRACKING BARU ---
-
-# Halaman publik untuk customer melihat posisi driver
+# --- FITUR LIVE TRACKING ---
 @app.route('/track/<tracking_id>')
 def track_order(tracking_id):
-    # Cari order berdasarkan token acak
     order = Order.query.filter_by(tracking_id=tracking_id).first_or_404()
     return render_template('tracking.html', order=order)
 
-# Menerima lokasi dari driver dan membagikannya ke customer
 @socketio.on('driver_update_location')
 def handle_location(data):
-    # data berisi: {'tracking_id': 'TOKEN123', 'lat': -6.123, 'lng': 106.123}
-    # Teruskan data ini ke semua pengguna (Nanti difilter di halaman HTML pembeli)
     emit('location_broadcast', data, broadcast=True)
 
 
@@ -133,4 +128,6 @@ with app.app_context():
     db.session.commit()
 
 if __name__ == '__main__':
-    socketio.run(app, debug=True, host='0.0.0.0', port=5000)
+    # Glitch butuh settingan port dinamis
+    port = int(os.environ.get("PORT", 3000))
+    socketio.run(app, debug=True, host='0.0.0.0', port=port)
